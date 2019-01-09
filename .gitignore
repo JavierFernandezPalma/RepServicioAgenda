@@ -1,0 +1,15 @@
+// https://github.com/JavierFernandezPalma/RepServicioAgenda.git
+
+.vs/
+AgendaCSJ.sln
+MODELO/
+Output-Build.txt
+ROBOT/
+ROBOT2/
+Sentencias SQL.txt
+ServiceWindowsTest/
+Servicio_AgendaCSJ/
+WEB/
+packages/
+BD/
+ServicioAgendamiento/
