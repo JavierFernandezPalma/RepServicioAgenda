@@ -18,7 +18,7 @@ namespace ROBOT
     {
         agendaEntities bd_agenda = new agendaEntities();
         Timer tmr = null;
-        ServicioCSJ pr2 = new ServicioCSJ();
+        ServicioCSJ servicio = new ServicioCSJ();
         LogErrores log = new LogErrores();
 
         public Service1()
@@ -81,31 +81,52 @@ namespace ROBOT
                 DateTime fecha = DateTime.Now;
                 var fechaAgendamiento = Convert.ToString(fecha);
                 log.EscribaLog("EjecutarAgendamiento()", "Iniciando el metodo EjecutarAgendamiento()");
+                bool control = false;
 
-                foreach (var idAgendar in idNoAgendados)
+                foreach (var filaAgendar in idNoAgendados)
                 {
 
-                    if (idAgendar.EstadoAgendamiento == 4)
+                    if (filaAgendar.EstadoAgendamiento == 4)
                     {
 
-                        bd_agenda.t_formulario.Attach(idAgendar);
-                        idAgendar.EstadoAgendamiento = 1;
+                        bd_agenda.t_formulario.Attach(filaAgendar);
+                        filaAgendar.EstadoAgendamiento = 1;
                         bd_agenda.Configuration.ValidateOnSaveEnabled = false;
                         bd_agenda.SaveChanges();
 
-                        var credenciales = (from db in bd_agenda.t_login_rp1cloud where db.CodigoSala == idAgendar.Sala select db).First();
+                        var credenciales = (from db in bd_agenda.t_login_rp1cloud where db.CodigoSala == filaAgendar.Sala select db).First();
                         string usuario = credenciales.Usuario_Rp1Cloud;
                         string clave = credenciales.Clave;
 
-                        //pr2.ServicioAgenda(filaAgendar.Id, usuario, clave);
-                        bd_agenda.SP_REGISTRO_RP1CLUOD(idAgendar.Id, idAgendar.Num_Consecutivo, idAgendar.Codigo, fechaAgendamiento);
+                        var difDiasAgendamiento = Convert.ToInt32(Convert.ToDateTime(filaAgendar.FechaFinalizacion).Day - Convert.ToDateTime(filaAgendar.FechaRealizacion).Day);
 
-                        bd_agenda.t_formulario.Attach(idAgendar);
-                        idAgendar.EstadoAgendamiento = 2;
+                        for (int i = 0; i <= difDiasAgendamiento; i++)
+                        {
+                            bd_agenda.t_formulario.Attach(filaAgendar);
+                            filaAgendar.FechaRealizacion = Convert.ToDateTime(filaAgendar.FechaRealizacion).AddDays(i).ToString();
+                            control = servicio.ServicioAgenda(filaAgendar, usuario, clave);
+
+                            if (i == difDiasAgendamiento)
+                            {
+                                filaAgendar.FechaRealizacion = Convert.ToDateTime(filaAgendar.FechaRealizacion).AddDays(-difDiasAgendamiento).ToString();
+                            }
+                        }
+
+                        bd_agenda.SP_REGISTRO_RP1CLUOD(filaAgendar.Id, filaAgendar.Num_Consecutivo, filaAgendar.Codigo, fechaAgendamiento);
+
+                        if (control == true)
+                        {
+                            filaAgendar.EstadoAgendamiento = 5;
+                            log.EscribaLog("EjecutarAgendamiento()", "Registro con error N° " + filaAgendar.Id);
+                        }
+                        else
+                        {
+                            filaAgendar.EstadoAgendamiento = 2;
+                            log.EscribaLog("EjecutarAgendamiento()", "Registro agendado N° " + filaAgendar.Id);
+                        }
+
                         bd_agenda.Configuration.ValidateOnSaveEnabled = false;
                         bd_agenda.SaveChanges();
-
-                        log.EscribaLog("EjecutadoAgendamiento", "Registro agendado N° " + idAgendar.Id);
                     }
                 }
 
@@ -122,11 +143,18 @@ namespace ROBOT
         {
             //var listaNoAgendados = bd_agenda.SP_LISTA_AGENDA().ToList();
 
-            var listaNoAgendados = (from db in bd_agenda.t_formulario where !(from db2 in bd_agenda.t_contador select db2.IdFormulario).Contains(db.Id) select db).ToList();
-
-            if (listaNoAgendados.Count != 0)
+            try
             {
-                EjecutarAgendamiento(listaNoAgendados);
+                var listaNoAgendados = (from db in bd_agenda.t_formulario where !(from db2 in bd_agenda.t_contador select db2.IdFormulario).Contains(db.Id) select db).Take(100).ToList();
+
+                if (listaNoAgendados.Count != 0)
+                {
+                    EjecutarAgendamiento(listaNoAgendados);
+                }
+            }
+            catch (Exception ex)
+            {
+                log.EscribaLog("verificarAgendamientos()_Error", "El error es : " + ex.ToString());
             }
         }
 
@@ -134,25 +162,32 @@ namespace ROBOT
         {
             //var registrosFechaVencida = bd_agenda.SP_LISTA_AGENDAVENCIDOS().ToList();
             DateTime fechaActual = DateTime.Now;
-            var registrosFechaVencida = (from db in bd_agenda.t_formulario where db.Estado == "AGENDADA" && db.EstadoAgendamiento == 2 select db).ToList();
 
-            if (registrosFechaVencida.Count != 0)
+            try
             {
-                foreach (var filaVencido in registrosFechaVencida)
+                var registrosFechaVencida = (from db in bd_agenda.t_formulario where db.Estado == "AGENDADA" && db.EstadoAgendamiento == 2 select db).Take(100).ToList();
+
+                if (registrosFechaVencida.Count != 0)
                 {
-
-                    if (System.Convert.ToDateTime(filaVencido.FechaRealizacion).AddDays(1) <= fechaActual)
+                    foreach (var filaVencido in registrosFechaVencida)
                     {
-                        var agendaVencidos = (from db in bd_agenda.t_formulario where db.Id == filaVencido.Id select db).First();
+                        var agendaVencido = (from db in bd_agenda.t_formulario where db.Id == filaVencido.Id select db).First();
 
-                        bd_agenda.t_formulario.Attach(agendaVencidos);
-                        agendaVencidos.Estado = "NO REALIZADA";
-                        agendaVencidos.EstadoAgendamiento = 3;
-                        bd_agenda.Configuration.ValidateOnSaveEnabled = false;
-                        bd_agenda.SaveChanges();
+                        if (System.Convert.ToDateTime(agendaVencido.FechaFinalizacion).AddDays(2) <= fechaActual)
+                        {
+                            bd_agenda.t_formulario.Attach(agendaVencido);
+                            agendaVencido.Estado = "NO REALIZADA";
+                            agendaVencido.EstadoAgendamiento = 3;
+                            bd_agenda.Configuration.ValidateOnSaveEnabled = false;
+                            bd_agenda.SaveChanges();
+                        }
                     }
-                }
 
+                }
+            }
+            catch (Exception ex)
+            {
+                log.EscribaLog("verificarPlazoAgendamiento()_Error", "El error es : " + ex.ToString());
             }
         }
 
